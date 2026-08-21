@@ -23,4 +23,10 @@ pip install -r requirements.txt
 
 ## License
 
-MIT
+Apache
+
+conda create -n langchainmultiagent python=3.11 -y
+
+conda activate langchainmultiagent
+
+pip install -r requirements.txt
