@@ -19,69 +19,180 @@ from deployment.agents.agents import (
 st.set_page_config(
     page_title="Multi-Agent Research System",
     page_icon="🔍",
-    layout="centered",
+    layout="wide",
 )
 
-st.title("🔍 Multi-Agent Research System")
-st.caption("Search → Read → Write → Critique, powered by LangChain + LangGraph")
+# ================================
+# MINIMAL STYLING
+# ================================
+st.markdown("""
+<style>
+.stApp { background: #0b1120; }
+.block-container { padding-top: 3rem; max-width: 1100px; }
+
+.label { color:#38bdf8; font-size:.72rem; letter-spacing:.15em; font-weight:700; }
+
+/* gradient run button */
+div.stButton > button {
+    width: 100%;
+    background: linear-gradient(90deg,#38bdf8,#6366f1,#a855f7);
+    color: #fff; border: none; border-radius: 12px;
+    padding: .7rem; font-weight: 700; font-size: 1rem;
+}
+div.stButton > button:hover { filter: brightness(1.1); }
+
+/* agent cards */
+.card {
+    background:#111827; border:1px solid #1f2937; border-radius:14px;
+    padding:1rem 1.2rem; margin-bottom:.9rem;
+}
+.card .num { color:#6366f1; font-weight:700; margin-right:.4rem; }
+.card .name { color:#e5e7eb; font-weight:700; font-size:1.05rem; }
+.card .desc { color:#94a3b8; font-size:.85rem; margin-top:.25rem; }
+.pill { float:right; font-size:.65rem; letter-spacing:.12em; font-weight:700;
+        padding:.15rem .5rem; border-radius:6px; }
+.waiting { color:#64748b; background:#1e293b; }
+.running { color:#0b1120; background:#38bdf8; }
+.done    { color:#0b1120; background:#22c55e; }
+
+.hero {
+    text-align: center;
+    padding: 1.6rem 1rem 2rem;
+    margin-bottom: 1.5rem;
+    border-bottom: 1px solid #1f2937;
+}
+.hero-title {
+    font-size: 2.4rem;
+    font-weight: 800;
+    background: linear-gradient(90deg,#38bdf8,#6366f1,#a855f7);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+.hero-sub {
+    color: #94a3b8;
+    font-size: .95rem;
+    margin-top: .4rem;
+    letter-spacing: .02em;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # ================================
-# INPUT
+# AGENT CARD HELPERS
 # ================================
-topic = st.text_input(
-    "Research topic",
-    placeholder="e.g. The impact of AI on renewable energy",
-)
+AGENTS = [
+    ("01", "Search Agent", "Gathers recent web information"),
+    ("02", "Reader Agent", "Scrapes &amp; extracts deep content"),
+    ("03", "Writer Chain", "Drafts the full research report"),
+    ("04", "Critic Chain", "Reviews &amp; scores the report"),
+]
+STATUS = {"waiting": "WAITING", "running": "RUNNING", "done": "DONE"}
 
-run = st.button("Run Research", type="primary", disabled=not topic.strip())
+
+def card_html(num, name, desc, status):
+    return f"""
+    <div class="card">
+        <span class="pill {status}">{STATUS[status]}</span>
+        <span class="num">#{num}</span><span class="name">{name}</span>
+        <div class="desc">{desc}</div>
+    </div>
+    """
+
+
+def render_cards(slot, statuses):
+    slot.markdown(
+        "".join(card_html(*AGENTS[i], statuses[i]) for i in range(4)),
+        unsafe_allow_html=True,
+    )
 
 # ================================
-# PIPELINE (4 agents, live feedback)
+# HERO HEADER
+# ================================
+st.markdown("""
+<div class="hero">
+    <div class="hero-title">🔍 Multi-Agent Research System</div>
+    <div class="hero-sub">Search → Read → Write → Critique &nbsp;·&nbsp; powered by LangChain + LangGraph</div>
+</div>
+""", unsafe_allow_html=True)
+
+# ================================
+# LAYOUT
+# ================================
+if "topic" not in st.session_state:
+    st.session_state.topic = ""
+
+left, right = st.columns([1, 1], gap="large")
+
+with left:
+    st.markdown('<div class="label">RESEARCH TOPIC</div>', unsafe_allow_html=True)
+
+    with st.form("research_form"):
+        topic = st.text_input(
+            "topic", key="topic", label_visibility="collapsed",
+            placeholder="e.g. Roadmap for AGI development in next 5 years",
+        )
+        run = st.form_submit_button("⚡ Run Research Pipeline")
+
+    st.markdown('<div class="label" style="margin-top:1rem;">TRY</div>', unsafe_allow_html=True)
+    examples = [
+        "Future of LLM in Tech Industry",
+        "All Latest AI Agents in 2026",
+        "Roadmap for AGI development in next 5 years",
+    ]
+    for ex in examples:
+        if st.button(ex, key=f"ex_{ex}"):
+            st.session_state.topic = ex
+            st.rerun()
+
+with right:
+    cards_slot = st.empty()
+    statuses = ["waiting"] * 4
+    render_cards(cards_slot, statuses)
+
+# ================================
+# PIPELINE
 # ================================
 if run:
     state = {}
 
-    # ---- Step 01: Search ----
-    with st.status("Step 01 — Search agent is gathering sources...", expanded=False) as s:
-        search_agent = build_search_agent()
-        search_result = search_agent.invoke({
-            "messages": [("user", f"Find recent, reliable and detailed information about: {topic}")]
-        })
-        state["search_results"] = search_result["messages"][-1].content
-        s.update(label="Step 01 — Search complete ✅", state="complete")
+    def step(i, label, fn):
+        statuses[i] = "running"; render_cards(cards_slot, statuses)
+        with st.spinner(label):
+            fn()
+        statuses[i] = "done"; render_cards(cards_slot, statuses)
 
-    # ---- Step 02: Read/Scrape ----
-    with st.status("Step 02 — Reader agent is scraping the best source...", expanded=False) as s:
-        reader_agent = build_reader_agent()
-        reader_result = reader_agent.invoke({
-            "messages": [("user",
-                f"Based on the following search results about '{topic}', "
-                f"pick the most relevant URL and scrape it for deeper content.\n\n"
-                f"Search Results:\n{state['search_results'][:5800]}"
-            )]
-        })
-        state["scraped_content"] = reader_result["messages"][-1].content
-        s.update(label="Step 02 — Reading complete ✅", state="complete")
+    def do_search():
+        agent = build_search_agent()
+        r = agent.invoke({"messages": [("user", f"Find recent, reliable and detailed information about: {topic}")]})
+        state["search_results"] = r["messages"][-1].content
 
-    # ---- Step 03: Write ----
-    with st.status("Step 03 — Writer is drafting the report...", expanded=False) as s:
-        research_combined = f"SEARCH RESULTS:\n{state['scraped_content']}"
+    def do_read():
+        agent = build_reader_agent()
+        r = agent.invoke({"messages": [("user",
+            f"Based on the following search results about '{topic}', "
+            f"pick the most relevant URL and scrape it for deeper content.\n\n"
+            f"Search Results:\n{state['search_results'][:5800]}")]})
+        state["scraped_content"] = r["messages"][-1].content
+
+    def do_write():
         state["report"] = writer_chain.invoke({
             "topic": topic,
-            "research": research_combined,
+            "research": f"SEARCH RESULTS:\n{state['scraped_content']}",
         })
-        s.update(label="Step 03 — Report drafted ✅", state="complete")
 
-    # ---- Step 04: Critique ----
-    with st.status("Step 04 — Critic is reviewing the report...", expanded=False) as s:
+    def do_critic():
         state["feedback"] = critic_chain.invoke({"report": state["report"]})
-        s.update(label="Step 04 — Review complete ✅", state="complete")
 
-    # ================================
+    step(0, "🔍 Search agent is gathering sources...", do_search)
+    step(1, "📖 Reader agent is scraping the best source...", do_read)
+    step(2, "✍️ Writer is drafting the report...", do_write)
+    step(3, "🧐 Critic is reviewing the report...", do_critic)
+
+        # ================================
     # RESULTS
     # ================================
-    st.success("Research complete!")
-
+    st.markdown("---")
     report_tab, critic_tab, raw_tab = st.tabs(["📄 Report", "🧐 Critic", "🔎 Raw research"])
 
     with report_tab:
